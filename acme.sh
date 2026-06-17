@@ -11,8 +11,8 @@ readp(){ read -p "$(yellow "$1")" $2;}
 # root权限检查
 [[ $EUID -ne 0 ]] && yellow "请以root模式运行脚本" && exit 1
 
-# 允许使用 Ctrl+C 打断退出
-trap 'echo -e "\n${red}脚本已被用户手动中断退出。${plain}"; exit 1' INT
+# 允许使用 Ctrl+C 打断退出，且不打印任何提示文字
+trap 'echo -e "\033[0m"; exit 1' INT
 
 WORK_DIR="/root/xsjca"
 ACME_BIN="/root/.acme.sh/acme.sh"
@@ -20,7 +20,7 @@ ACME_BIN="/root/.acme.sh/acme.sh"
 # 自动检测并安装所需 system 底层依赖
 install_deps(){
     if [ ! -f /root/.xsjca_deps_done ]; then
-        green "开始检测并前台安装所需 system 底层依赖组件..."
+        green "检测所需依赖..."
         if [ -x "$(command -v apt-get)" ]; then
             apt update -y && apt install socat cron curl openssl lsof dnsutils tar wget jq -y
         elif [ -x "$(command -v yum)" ]; then
@@ -30,7 +30,7 @@ install_deps(){
             dnf install socat cronie lsof bind-utils tar wget openssl curl jq -y
         fi
         touch /root/.xsjca_deps_done
-        green "系统依赖组件补齐完成！"
+        green "依赖安装完成！"
     fi
     
     # 纯 IPV6 机器自动补充 DNS64，防止拉取不到外部网络资源
@@ -46,7 +46,7 @@ stop_80_port(){
     if [[ -n $(lsof -i :80|grep -v "PID") ]]; then
         yellow "检测到 80 端口被占用，正在前台执行强制释放..."
         lsof -i :80|grep -v "PID"|awk '{print "kill -9",$2}'|sh
-        green "80 端口释放完毕。"
+        green " 80 端口释放完毕。"
         sleep 1
     fi
 }
@@ -80,11 +80,16 @@ archive_and_display_output(){
         echo "0 0 * * * bash /root/.acme.sh/acme.sh --cron -f >/dev/null 2>&1" >> /tmp/cron.tmp
         crontab /tmp/cron.tmp && rm -f /tmp/cron.tmp
         
+        # 智能判断当前的证书类型（域名还是IP）
+        local cert_type="域名证书"
+        [[ "$NumberInput" == "2" ]] && cert_type="IP证书"
+        
         echo
-        green "证书申请成功！"
-        yellow "证书（cert.crt）和密钥（private.key）已保存到 /root/xsjca 文件夹内"
-        green "公钥文件crt路径如下，可直接复制：/root/xsjca/${name}/cert.crt"
-        green "密钥文件key路径如下，可直接复制：/root/xsjca/${name}/private.key"
+        green "${cert_type}申请成功或已存在！${cert_type}（cert.crt）和密钥（private.key）已保存到 ${target_path} 文件夹内"
+        green "公钥文件crt路径如下，可直接复制 "
+        white "${target_path}/cert.crt"
+        green "密钥文件key路径如下，可直接复制"
+        white "${target_path}/private.key"
         echo
     else
         red "证书同步失败，请检查上方的 acme.sh 底层输出报错。"
@@ -178,11 +183,11 @@ case "$NumberInput" in
         
         echo
         if [ "$is_v6" = true ]; then
-            blue "当前智能匹配到 IPV6 路径，域名解析：${domain_ip}"
+            blue "当前匹配到 IPV6 路径，域名解析：${domain_ip}"
         else
-            blue "当前智能匹配到 IPV4 路径，域名解析：${domain_ip:-'未检测到'}"
+            blue "当前匹配到 IPV4 路径，域名解析：${domain_ip:-'未检测到'}"
         fi
-        blue "当前 VPS 本地真实公网 IP 地址：${vpsip:-'未检测到'}"
+        blue "当前 VPS IP 地址：${vpsip:-'未检测到'}"
         echo
         
         # 3. 根据自主判断的结果执行对应申请
@@ -221,14 +226,14 @@ case "$NumberInput" in
         fi
         
         get_local_ips
-        readp "请输入当前VPS公网IP (直接回车全自动获取本机IP): " INPUT_IP
+        readp "请输入当前VPS IP (直接回车全自动获取本机IP): " INPUT_IP
         TARGET_IP=${INPUT_IP:-$v4_local}
         if [[ -z $TARGET_IP && -n $v6_local ]]; then
             TARGET_IP=$v6_local
         fi
         
         if [[ "$TARGET_IP" != "$v4_local" && "$TARGET_IP" != "$v6_local" ]]; then
-            red "错误：输入的 IP ($TARGET_IP) 与本机实际公网 IP 不符！" && exit 1
+            red "错误：输入的 IP ($TARGET_IP) 与本机 IP 不符！" && exit 1
         fi
         
         init_acme_core "$Aemail"
@@ -251,16 +256,36 @@ case "$NumberInput" in
         
     3 )
         if [ ! -f "$ACME_BIN" ]; then
-            red "系统内未安装 acme.sh 核心，无法续期！" && exit 1
+            red "未安装 acme.sh 核心，无法续期！" && exit 1
         fi
-        green "正在前台强制续期系统内现存的所有证书..."
+        green "正在续期证书..."
+        stop_80_port
         $ACME_BIN --cron -f
-        green "续期动作轮询结束。"
+        echo
+        green "证书续期完成！"
+        
+        # 自动扫描现存证书文件夹，挨个精准打印实际具体路径提示
+        if [ -d "$WORK_DIR" ]; then
+            for folder in $(ls "$WORK_DIR"); do
+                if [[ -s "${WORK_DIR}/${folder}/cert.crt" && -s "${WORK_DIR}/${folder}/private.key" ]]; then
+                    yellow "--------------------------------------------------"
+                    green "证书已存在或续期成功！证书（cert.crt）和密钥（private.key）已保存到 ${WORK_DIR}/${folder} 文件夹内"
+                    green "公钥文件crt路径如下，可直接复制 "
+                    white "${WORK_DIR}/${folder}/cert.crt"
+                    green "密钥文件key路径如下，可直接复制"
+                    white "${WORK_DIR}/${folder}/private.key"
+                fi
+            done
+            yellow "--------------------------------------------------"
+        else
+            red "未在本地检测到任何有效的证书备份目录。"
+        fi
+        echo
         ;;
         
     4 )
         red "=================================================="
-        red " 警告：该操作将彻底清空 /root/xsjca 根文件夹、所有现存证书及自动续签任务！"
+        red " 警告：该操作将彻底清空所有现存证书及自动续签任务！"
         red "=================================================="
         readp "确定要彻底删除证书并卸载一键申请脚本吗？(输入 y 确认 / 其他任意键取消): " DEL_CONFIRM
         if [[ "$DEL_CONFIRM" == "y" || "$DEL_CONFIRM" == "Y" ]]; then
@@ -273,8 +298,7 @@ case "$NumberInput" in
             
             crontab -l 2>/dev/null | grep -v 'acme.sh --cron' > /tmp/cron.tmp
             crontab /tmp/cron.tmp && rm -f /tmp/cron.tmp
-            
-            green "删除并卸载完毕！所有申请的证书和环境组件已彻底被清理！"
+            exit 0
         fi
         ;;
         
