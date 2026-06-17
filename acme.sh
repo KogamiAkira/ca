@@ -20,7 +20,7 @@ ACME_BIN="/root/.acme.sh/acme.sh"
 # 自动检测并安装所需 system 底层依赖
 install_deps(){
     if [ ! -f /root/.xsjca_deps_done ]; then
-        green "开始检测并前台安装所需系统底层依赖组件..."
+        green "开始检测并前台安装所需 system 底层依赖组件..."
         if [ -x "$(command -v apt-get)" ]; then
             apt update -y && apt install socat cron curl openssl lsof dnsutils tar wget jq -y
         elif [ -x "$(command -v yum)" ]; then
@@ -31,6 +31,13 @@ install_deps(){
         fi
         touch /root/.xsjca_deps_done
         green "系统依赖组件补齐完成！"
+    fi
+    
+    # 纯 IPV6 机器自动补充 DNS64，防止拉取不到外部网络资源
+    if [[ -z $(curl -s4m5 icanhazip.com -k) ]]; then
+        yellow "检测到当前 VPS 为纯 IPV6 环境，正在全自动补充 DNS64 解析..."
+        echo -e "nameserver 2a00:1098:2b::1\nnameserver 2a00:1098:2b::2\nnameserver 2a01:4f8:c2c:123f::1" > /etc/resolv.conf
+        sleep 1
     fi
 }
 
@@ -47,9 +54,9 @@ stop_80_port(){
 # 初始化安装 acme.sh 核心
 init_acme_core(){
     if [ ! -f "$ACME_BIN" ]; then
-        green "开始安装acme.sh申请证书脚本"
+        green "开始安装 acme.sh 申请证书脚本"
         curl https://get.acme.sh | sh -s email="$1"
-        green "安装acme.sh证书申请程序成功"
+        green "安装 acme.sh 证书申请程序成功"
         $ACME_BIN --upgrade --auto-upgrade
     fi
 }
@@ -73,10 +80,9 @@ archive_and_display_output(){
         echo "0 0 * * * bash /root/.acme.sh/acme.sh --cron -f >/dev/null 2>&1" >> /tmp/cron.tmp
         crontab /tmp/cron.tmp && rm -f /tmp/cron.tmp
         
-        # 极简纯路径输出，无等号边框
         echo
         green "证书申请成功！"
-        yellow "域名证书（cert.crt）和密钥（private.key）已保存到 /root/xsjca文件夹内"
+        yellow "证书（cert.crt）和密钥（private.key）已保存到 /root/xsjca 文件夹内"
         green "公钥文件crt路径如下，可直接复制：/root/xsjca/${name}/cert.crt"
         green "密钥文件key路径如下，可直接复制：/root/xsjca/${name}/private.key"
         echo
@@ -100,11 +106,22 @@ show_fail_tips(){
     exit 1
 }
 
+# 双栈获取本地真实公网 IP 函数
+get_local_ips(){
+    v4_local=$(curl -s4m5 icanhazip.com -k)
+    v6_local=$(curl -s6m5 icanhazip.com -k)
+    if [[ -n $v4_local && -n $v6_local ]]; then
+        vpsip="$v4_local 和 $v6_local"
+    else
+        vpsip="${v4_local:-$v6_local}"
+    fi
+}
+
 # 菜单选择逻辑控制循环
 while true; do
     clear
     echo "=================================================="
-    green "          KogamiAkira证书申请脚本"
+    green "          KogamiAkira证书申请脚本 (自主判断双栈版)"
     echo "=================================================="
     yellow " 1. 申请域名证书"
     yellow " 2. 申请IP证书"
@@ -138,22 +155,50 @@ case "$NumberInput" in
         readp "请输入解析完成的域名: " DOMAIN
         [[ -z "$DOMAIN" ]] && red "域名不能为空！" && exit 1
         
-        v4_local=$(curl -s4m5 icanhazip.com -k)
-        domain_ip=$(dig @8.8.8.8 +time=2 +short "$DOMAIN" 2>/dev/null | grep -m1 '^[0-9]')
+        # 1. 分别查询域名的 v4 和 v6 解析结果
+        domain_v4=$(dig @8.8.8.8 +time=2 +short "$DOMAIN" 2>/dev/null | grep -m1 '^[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+$')
+        domain_v6=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$DOMAIN" 2>/dev/null | grep -m1 ':')
+        
+        get_local_ips
+        
+        # 2. 自主智能判断：优先看 v4 是否对上本地，对不上再看 v6 是否对上
+        is_match=false
+        is_v6=false
+        domain_ip=""
+
+        if [[ -n $v4_local && -n $domain_v4 && "$domain_v4" == "$v4_local" ]]; then
+            is_match=true
+            is_v6=false
+            domain_ip="$domain_v4"
+        elif [[ -n $v6_local && -n $domain_v6 && "$domain_v6" == "$v6_local" ]]; then
+            is_match=true
+            is_v6=true
+            domain_ip="$domain_v6"
+        fi
         
         echo
-        blue "当前域名解析到的IPV4地址：${domain_ip:-'未检测到'}"
-        blue "当前VPS本地真实公网IPV4地址：${v4_local:-'未检测到'}"
+        if [ "$is_v6" = true ]; then
+            blue "当前智能匹配到 IPV6 路径，域名解析：${domain_ip}"
+        else
+            blue "当前智能匹配到 IPV4 路径，域名解析：${domain_ip:-'未检测到'}"
+        fi
+        blue "当前 VPS 本地真实公网 IP 地址：${vpsip:-'未检测到'}"
         echo
         
-        if [[ ! -z "$v4_local" && "$domain_ip" == "$v4_local" ]]; then
+        # 3. 根据自主判断的结果执行对应申请
+        if [ "$is_match" = true ]; then
             green "IP匹配正确，申请证书开始…………"
             echo
             
             init_acme_core "$Aemail"
             stop_80_port
             $ACME_BIN --set-default-ca --server letsencrypt
-            $ACME_BIN --issue -d "$DOMAIN" --standalone -k ec-256 --force
+            
+            if [ "$is_v6" = true ]; then
+                $ACME_BIN --issue -d "$DOMAIN" --standalone -k ec-256 --listen-v6 --force
+            else
+                $ACME_BIN --issue -d "$DOMAIN" --standalone -k ec-256 --force
+            fi
             
             if [ $? -eq 0 ]; then
                 archive_and_display_output "$DOMAIN"
@@ -175,19 +220,27 @@ case "$NumberInput" in
             Aemail="$INPUT_EMAIL"
         fi
         
-        v4_local=$(curl -s4m5 icanhazip.com -k)
+        get_local_ips
         readp "请输入当前VPS公网IP (直接回车全自动获取本机IP): " INPUT_IP
         TARGET_IP=${INPUT_IP:-$v4_local}
+        if [[ -z $TARGET_IP && -n $v6_local ]]; then
+            TARGET_IP=$v6_local
+        fi
         
-        if [[ "$TARGET_IP" != "$v4_local" ]]; then
-            red "错误：输入的 IP ($TARGET_IP) 与本机实际公网 IP ($v4_local) 不符！" && exit 1
+        if [[ "$TARGET_IP" != "$v4_local" && "$TARGET_IP" != "$v6_local" ]]; then
+            red "错误：输入的 IP ($TARGET_IP) 与本机实际公网 IP 不符！" && exit 1
         fi
         
         init_acme_core "$Aemail"
         stop_80_port
         $ACME_BIN --register-account -m "$Aemail" --server zerossl || true
         $ACME_BIN --set-default-ca --server zerossl
-        $ACME_BIN --issue -d "$TARGET_IP" --standalone -k ec-256 --force
+        
+        if [[ -n $(echo "$TARGET_IP" | grep ":") ]]; then
+            $ACME_BIN --issue -d "$TARGET_IP" --standalone -k ec-256 --listen-v6 --force
+        else
+            $ACME_BIN --issue -d "$TARGET_IP" --standalone -k ec-256 --force
+        fi
         
         if [ $? -eq 0 ]; then
             archive_and_display_output "$TARGET_IP"
@@ -206,28 +259,22 @@ case "$NumberInput" in
         ;;
         
     4 )
-        # 选项 4：彻底集成证书清除与内核卸载
         red "=================================================="
         red " 警告：该操作将彻底清空 /root/xsjca 根文件夹、所有现存证书及自动续签任务！"
         red "=================================================="
         readp "确定要彻底删除证书并卸载一键申请脚本吗？(输入 y 确认 / 其他任意键取消): " DEL_CONFIRM
         if [[ "$DEL_CONFIRM" == "y" || "$DEL_CONFIRM" == "Y" ]]; then
-            # 如果 acme.sh 存在，调用官方注销卸载
             if [ -f "$ACME_BIN" ]; then
                 $ACME_BIN --uninstall >/dev/null 2>&1
             fi
-            # 强力抹除核心母体目录、生成的 xsjca 证书文件和依赖标记，实现0残留
             rm -rf /root/.acme.sh
             rm -rf "$WORK_DIR"
             rm -f /root/.xsjca_deps_done
             
-            # 清理系统层级的 crontab 计划任务记录
             crontab -l 2>/dev/null | grep -v 'acme.sh --cron' > /tmp/cron.tmp
             crontab /tmp/cron.tmp && rm -f /tmp/cron.tmp
             
-            green "删除并卸载完毕！所有申请的证书和环境组件已彻底被清理干净！"
-        else
-            green "操作已安全取消。"
+            green "删除并卸载完毕！所有申请的证书和环境组件已彻底被清理！"
         fi
         ;;
         
