@@ -121,7 +121,7 @@ get_local_ips(){
 while true; do
     clear
     echo "=================================================="
-    green "          KogamiAkira证书申请脚本 (自主判断双栈版)"
+    green "          KogamiAkira证书申请脚本"
     echo "=================================================="
     yellow " 1. 申请域名证书"
     yellow " 2. 申请IP证书"
