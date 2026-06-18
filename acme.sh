@@ -33,7 +33,7 @@ install_deps(){
         green "依赖安装完成！"
     fi
     
-    # 纯 IPV6 机器自动补充 DNS64，防止拉取不到外部网络资源
+    # 纯 IPV6 机器自动补充 DNS64，防止拉取不到外部 network 资源
     if [[ -z $(curl -s4m5 icanhazip.com -k) ]]; then
         yellow "检测到当前 VPS 为纯 IPV6 环境，正在全自动补充 DNS64 解析..."
         echo -e "nameserver 2a00:1098:2b::1\nnameserver 2a00:1098:2b::2\nnameserver 2a01:4f8:c2c:123f::1" > /etc/resolv.conf
@@ -87,9 +87,9 @@ archive_and_display_output(){
         echo
         green "${cert_type}申请成功或已存在！${cert_type}（cert.crt）和密钥（private.key）已保存到 ${target_path} 文件夹内"
         green "公钥文件crt路径如下，可直接复制 "
-        white "${target_path}/cert.crt"
+        yellow "${target_path}/cert.crt"
         green "密钥文件key路径如下，可直接复制"
-        white "${target_path}/private.key"
+        yellow "${target_path}/private.key"
         echo
     else
         red "证书同步失败，请检查上方的 acme.sh 底层输出报错。"
@@ -271,9 +271,9 @@ case "$NumberInput" in
                     yellow "--------------------------------------------------"
                     green "证书已存在或续期成功！证书（cert.crt）和密钥（private.key）已保存到 ${WORK_DIR}/${folder} 文件夹内"
                     green "公钥文件crt路径如下，可直接复制 "
-                    white "${WORK_DIR}/${folder}/cert.crt"
+                    yellow "${WORK_DIR}/${folder}/cert.crt"
                     green "密钥文件key路径如下，可直接复制"
-                    white "${WORK_DIR}/${folder}/private.key"
+                    yellow "${WORK_DIR}/${folder}/private.key"
                 fi
             done
             yellow "--------------------------------------------------"
