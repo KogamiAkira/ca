@@ -33,7 +33,7 @@ install_deps(){
         green "依赖安装完成！"
     fi
     
-    # 纯 IPV6 机器自动补充 DNS64，防止拉取不到外部 network 资源
+    # 纯 IPV6 机器自动补充 DNS64，防止拉取不到外部网络资源
     if [[ -z $(curl -s4m5 icanhazip.com -k) ]]; then
         yellow "检测到当前 VPS 为纯 IPV6 环境，正在全自动补充 DNS64 解析..."
         echo -e "nameserver 2a00:1098:2b::1\nnameserver 2a00:1098:2b::2\nnameserver 2a01:4f8:c2c:123f::1" > /etc/resolv.conf
