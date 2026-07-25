@@ -188,8 +188,68 @@ case "$NumberInput" in
                 yellow "2. Global API Key"
                 readp "请选择 [1-2]: " cf_choice
                 if [ "$cf_choice" = "1" ]; then
-                    readp "请输入 Cloudflare Account ID: " CFAccountID; export CF_Account_ID="$CFAccountID"
-                    readp "请输入 Cloudflare DNS API Token: " CFToken; export CF_Token="$CFToken"
+                    readp "请输入 Cloudflare Account ID: " CFAccountID
+                    export CF_Account_ID="$CFAccountID"
+                    readp "请输入 Cloudflare DNS API Token: " CFToken
+                    export CF_Token="$CFToken"
                 else
-                    readp "请输入 Cloudflare 邮箱: " CFemail; export CF_Email="$CFemail"
-                    readp "请输入 Global API Key: " GAK; export
+                    readp "请输入 Cloudflare 邮箱: " CFemail
+                    export CF_Email="$CFemail"
+                    readp "请输入 Global API Key: " GAK
+                    export CF_Key="$GAK"
+                fi
+                $ACME_BIN --issue --dns dns_cf -d "$DOMAIN" -k ec-256 --server letsencrypt --insecure
+                ;;
+            2)
+                readp "请输入 DNSPod DP_Id: " DPID
+                export DP_Id="$DPID"
+                readp "请输入 DNSPod DP_Key: " DPKEY
+                export DP_Key="$DPKEY"
+                $ACME_BIN --issue --dns dns_dp -d "$DOMAIN" -k ec-256 --server letsencrypt --insecure
+                ;;
+            3)
+                readp "请输入阿里云 Ali_Key: " ALKEY
+                export Ali_Key="$ALKEY"
+                readp "请输入阿里云 Ali_Secret: " ALSER
+                export Ali_Secret="$ALSER"
+                $ACME_BIN --issue --dns dns_ali -d "$DOMAIN" -k ec-256 --server letsencrypt --insecure
+                ;;
+        esac
+        [ $? -eq 0 ] && archive_and_display_output "$DOMAIN"
+        ;;
+        
+    4 )  # 查询证书
+        show_cert_list
+        ;;
+        
+    5 )  # 手动续期
+        if [ ! -f "$ACME_BIN" ]; then
+            red "未安装 acme.sh！" && exit 1
+        fi
+        green "正在手动一键证书续期..."
+        stop_80_port
+        $ACME_BIN --cron -f
+        green "证书续期完成！"
+        ;;
+        
+    6 )  # 卸载
+        red "=================================================="
+        red " 警告：该操作将彻底清空所有现存证书及自动续签任务！"
+        red "=================================================="
+        readp "确定要彻底删除证书并卸载脚本吗？(输入 y 确认 / 其他任意键取消): " DEL_CONFIRM
+        if [[ "$DEL_CONFIRM" == "y" || "$DEL_CONFIRM" == "Y" ]]; then
+            if [ -f "$ACME_BIN" ]; then
+                $ACME_BIN --uninstall >/dev/null 2>&1
+            fi
+            rm -rf /root/.acme.sh "$WORK_DIR" /root/.xsjca_deps_done
+            crontab -l 2>/dev/null | grep -v 'acme.sh --cron' > /tmp/cron.tmp && crontab /tmp/cron.tmp
+            green "卸载完成！"
+        fi
+        ;;
+        
+    0 )
+        exit 0
+        ;;
+esac
+
+exit 0
