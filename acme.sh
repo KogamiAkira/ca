@@ -31,7 +31,7 @@ install_deps(){
     
     if [[ -z $(curl -s4m5 icanhazip.com -k) ]]; then
         yellow "检测到当前 VPS 为纯 IPV6 环境，正在全自动补充 DNS64 解析..."
-        echo -e "nameserver 2a00:1098:2b::1\nnameserver 2a00:1098:2b::2\nnameserver 2a01:4f8:c2c:123f::1" > /etc/resolv.conf
+        echo -e "nameserver 2a00:1098:2b::1\nameserver 2a00:1098:2b::2\nnameserver 2a01:4f8:c2c:123f::1" > /etc/resolv.conf
         sleep 1
     fi
 }
